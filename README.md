@@ -4,6 +4,8 @@
 
 Dieses Projekt verbindet einen Joy-IT RC522 RFID-Reader mit einem Raspberry Pi über ein lokales WLAN-Netzwerk. Der ESP32-C6 liest RFID-Karten-UIDs und sendet sie per WebSocket an den Raspberry Pi. Der Raspberry Pi steuert den RFID-Reader (ein/aus) über denselben WebSocket-Kanal.
 
+Dieses Repo wird als `rfid-reader` Git-Submodule im Hauptrepo [storage-room](https://github.com/dejhfm/storage-room) eingebunden, das auch Frontend, InvenTree-Backend und die Gesamtarchitektur des ILLAR-Projekts dokumentiert.
+
 | Komponente   | Rolle                                |
 |--------------|--------------------------------------|
 | ESP32-C6 N4  | WebSocket-Server, SPI-Master         |
