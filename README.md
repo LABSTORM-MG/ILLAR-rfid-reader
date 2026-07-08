@@ -2,15 +2,17 @@
 
 ## Projektübersicht
 
-Dieses Projekt verbindet einen Joy-IT RC522 RFID-Reader mit einem Raspberry Pi über ein lokales WLAN-Netzwerk. Der ESP32-C6 liest RFID-Karten-UIDs und sendet sie per WebSocket an den Raspberry Pi. Der Raspberry Pi steuert den RFID-Reader (ein/aus) über denselben WebSocket-Kanal.
+Dieses Projekt verbindet einen Joy-IT RC522 RFID-Reader mit der Java-Middleware (`Lagerverwaltung`, Tomcat) auf dem Raspberry Pi über ein lokales WLAN-Netzwerk. Der ESP32-C6 liest RFID-Karten-UIDs kontinuierlich und verbindet sich dazu als WebSocket-**Client** zum `/ws/auth`-Endpoint der Middleware. Dort meldet er jede erkannte Karte per Tilde-Textprotokoll (`AUTH~RFID:<uid>`) — demselben Protokoll, das die Middleware bereits für Browser-Clients (`/ws/client`) verwendet.
 
 Dieses Repo wird als `rfid-reader` Git-Submodule im Hauptrepo [storage-room](https://github.com/dejhfm/storage-room) eingebunden, das auch Frontend, InvenTree-Backend und die Gesamtarchitektur des ILLAR-Projekts dokumentiert.
 
-| Komponente   | Rolle                                |
-|--------------|--------------------------------------|
-| ESP32-C6 N4  | WebSocket-Server, SPI-Master         |
-| RC522        | RFID-Reader (SPI-Slave)              |
-| Raspberry Pi | WebSocket-Client, Empfänger der UIDs |
+| Komponente   | Rolle                                          |
+|--------------|-------------------------------------------------|
+| ESP32-C6 N4  | WebSocket-**Client**, SPI-Master                |
+| RC522        | RFID-Reader (SPI-Slave)                         |
+| Raspberry Pi | WebSocket-Server (Java-Middleware `/ws/auth`)   |
+
+Es gibt keine Ein-/Ausschaltbarkeit des Scannens mehr — die Middleware kennt dafür keinen Befehl, daher scannt der Reader dauerhaft (mit 2000 ms Cooldown pro Karte, damit dieselbe Karte nicht mehrfach hintereinander gemeldet wird).
 
 ---
 
@@ -46,9 +48,8 @@ Dieses Repo wird als `rfid-reader` Git-Submodule im Hauptrepo [storage-room](htt
 |--------------------|------------------------|------------------------------------------------------|
 | `MFRC522`          | GithubCommunity        | Arduino IDE → Bibliotheksverwalter → „MFRC522"       |
 | `WebSockets`       | Markus Sattler         | Arduino IDE → Bibliotheksverwalter → „WebSockets"    |
-| `ArduinoJson`      | Benoit Blanchon        | Arduino IDE → Bibliotheksverwalter → „ArduinoJson"   |
 
-Alle Bibliotheken sind mit ESP32-C6 und Espressif Arduino Core 3.x kompatibel.
+Alle Bibliotheken sind mit ESP32-C6 und Espressif Arduino Core 3.x kompatibel. `ArduinoJson` wird nicht mehr benötigt, da der Reader jetzt das Tilde-Protokoll der Middleware statt JSON spricht.
 
 ---
 
@@ -68,40 +69,34 @@ Alle Bibliotheken sind mit ESP32-C6 und Espressif Arduino Core 3.x kompatibel.
 
 In `RFID_Reader.ino` die folgenden Konstanten am Anfang der Datei anpassen:
 
-| Konstante       | Bedeutung                        | Beispielwert       |
-|-----------------|----------------------------------|--------------------|
-| `WIFI_SSID`     | Name des WLAN-Netzwerks          | `"MeinHeimnetz"`   |
-| `WIFI_PASSWORD` | WLAN-Passwort                    | `"geheim123"`      |
-| `WS_PORT`       | WebSocket-Port                   | `8765`             |
-| `PIN_RFID_RST`  | GPIO für RC522 RST               | `3`                |
-| `PIN_RFID_MISO` | GPIO für SPI MISO                | `2`                |
-| `PIN_RFID_MOSI` | GPIO für SPI MOSI                | `7`                |
-| `PIN_RFID_SCK`  | GPIO für SPI Clock               | `6`                |
-| `PIN_RFID_NSS`  | GPIO für SPI Chip Select (SDA)   | `10`               |
+| Konstante       | Bedeutung                                | Beispielwert                |
+|-----------------|--------------------------------------------|------------------------------|
+| `WIFI_SSID`     | Name des WLAN-Netzwerks                    | `"MeinHeimnetz"`             |
+| `WIFI_PASSWORD` | WLAN-Passwort                              | `"geheim123"`                |
+| `MW_HOST`       | IP-Adresse des Raspberry Pi (Middleware)   | `"192.168.1.10"`             |
+| `MW_PORT`       | Tomcat-Port der Middleware                 | `8080`                        |
+| `MW_PATH`       | WebSocket-Pfad der Middleware              | `"/Lagerverwaltung/ws/auth"` |
+| `PIN_RFID_RST`  | GPIO für RC522 RST                         | `3`                          |
+| `PIN_RFID_MISO` | GPIO für SPI MISO                          | `2`                          |
+| `PIN_RFID_MOSI` | GPIO für SPI MOSI                          | `7`                          |
+| `PIN_RFID_SCK`  | GPIO für SPI Clock                         | `6`                          |
+| `PIN_RFID_NSS`  | GPIO für SPI Chip Select (SDA)             | `10`                         |
 
 ---
 
 ## WebSocket-Protokoll
 
-Alle Nachrichten werden als JSON-Strings übertragen.
+Der Reader verbindet sich als Client zu `ws://<MW_HOST>:<MW_PORT><MW_PATH>` und spricht das Tilde-Textprotokoll der Java-Middleware (`CMD~KEY:VALUE~KEY:VALUE`, siehe `Message`/`MessageParser` in `de.ross.websocket.protocol`).
 
-### Befehle (Raspberry Pi → ESP32)
+### Nachrichten (ESP32 → Middleware)
 
-| JSON                                    | Beschreibung                  |
-|-----------------------------------------|-------------------------------|
-| `{"command": "rfid", "state": true}`    | RFID-Reader aktivieren        |
-| `{"command": "rfid", "state": false}`   | RFID-Reader deaktivieren      |
-| `{"command": "ping"}`                   | Verbindung prüfen             |
+| Nachricht            | Beschreibung                |
+|-----------------------|------------------------------|
+| `AUTH~RFID:A1B2C3D4`   | Erkannte Karten-UID melden   |
 
-### Nachrichten (ESP32 → Raspberry Pi)
+### Nachrichten (Middleware → ESP32)
 
-| JSON                                      | Beschreibung                                              |
-|-------------------------------------------|-----------------------------------------------------------|
-| `{"type": "connected", "state": "off"}`   | Wird direkt nach Verbindungsaufbau gesendet (Initialzustand) |
-| `{"type": "state", "value": "on"}`        | Bestätigung: RFID ist jetzt aktiv                         |
-| `{"type": "state", "value": "off"}`       | Bestätigung: RFID ist jetzt inaktiv                       |
-| `{"type": "pong"}`                        | Antwort auf ping                                          |
-| `{"type": "card", "uid": "A1B2C3D4"}`    | Erkannte Karten-UID                                       |
+Der Reader verarbeitet keine eingehenden Befehle mehr — es gibt kein Ein-/Ausschalten des Scannens von der Middleware aus (die Middleware kennt dafür keinen Befehl). Eingehende Nachrichten (z.B. `ERROR~MSG:...` bei fehlerhaftem Format) werden nur zu Diagnosezwecken über Serial geloggt.
 
 ### UID-Format
 
@@ -118,59 +113,39 @@ Ein Cooldown von 2000 ms verhindert, dass dieselbe Karte mehrfach hintereinander
 
 ---
 
-## Verbindungsanleitung für den Raspberry Pi
+## Verbindung zur Middleware
 
-### WebSocket-URL
+Der ESP32 baut die Verbindung auf — nicht umgekehrt. Ziel ist der `/ws/auth`-Endpoint der Java-Middleware (`AuthWebsocket`, Projekt `Lagerverwaltung`):
 
 ```
-ws://<ESP32-IP>:<WS_PORT>
+ws://<MW_HOST>:<MW_PORT>/Lagerverwaltung/ws/auth
 ```
-
-Die IP-Adresse des ESP32 wird nach dem Start im seriellen Monitor ausgegeben (Baudrate 115200).
 
 **Beispiel:**
 ```
-ws://192.168.1.42:8765
+ws://192.168.1.10:8080/Lagerverwaltung/ws/auth
 ```
 
-### Python-Beispiel (websockets-Bibliothek)
+Die Middleware muss vor dem Einschalten des Readers laufen (Tomcat-Deployment von `Lagerverwaltung`); dank `setReconnectInterval()` verbindet sich der ESP32 automatisch, sobald sie erreichbar ist.
 
-```python
-import asyncio
-import json
-import websockets
+### Manuell testen (ohne Hardware)
 
-async def main():
-    uri = "ws://192.168.1.42:8765"
-    async with websockets.connect(uri) as ws:
-        # Initialzustand empfangen
-        msg = json.loads(await ws.recv())
-        print(f"Verbunden, Zustand: {msg['state']}")  # {"type": "connected", "state": "off"}
+Zum Testen der Middleware-Seite kann jedes WebSocket-Tool die Rolle des ESP32 simulieren, z.B. `wscat`:
 
-        # RFID aktivieren
-        await ws.send(json.dumps({"command": "rfid", "state": True}))
-        response = json.loads(await ws.recv())
-        print(f"Antwort: {response}")  # {"type": "state", "value": "on"}
-
-        # Karten lesen
-        while True:
-            msg = json.loads(await ws.recv())
-            if msg["type"] == "card":
-                print(f"UID: {msg['uid']}")
-
-asyncio.run(main())
-```
-
-Installation der Python-Bibliothek:
 ```bash
-pip install websockets
+npm install -g wscat
+wscat -c ws://192.168.1.10:8080/Lagerverwaltung/ws/auth
+
+> AUTH~RFID:A1B2C3D4
 ```
+
+Alternativ bietet die Middleware selbst eine Debug-Seite unter `web/rfid-test.html` (Karte „RFID Scanner" / `/ws/auth`) mit Log-Ansicht.
 
 ### Hinweise zum Verbindungsverhalten
 
-- Es ist immer nur **ein Client** gleichzeitig verbunden.
-- Trennt der Client die Verbindung, bleibt der RFID-Modus erhalten (ON oder OFF).
-- Der WebSocket-Server läuft dauerhaft weiter und akzeptiert neue Verbindungen.
+- Mehrere gleichzeitige Verbindungen zu `/ws/auth` sind möglich (z.B. echter ESP32 + `rfid-test.html` parallel) — die Middleware verwaltet alle Auth-Sessions in einem Set.
+- Der Reader scannt dauerhaft; es gibt keinen Ein-/Aus-Zustand mehr.
+- Bricht die Verbindung ab, versucht der ESP32 alle 5 Sekunden automatisch, sich neu zu verbinden.
 
 ---
 
