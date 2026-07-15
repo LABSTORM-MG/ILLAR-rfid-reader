@@ -100,11 +100,11 @@ Der Reader verarbeitet keine eingehenden Befehle mehr — es gibt kein Ein-/Auss
 
 ### UID-Format
 
-Die UID im Feld `"uid"` ist ein zusammenhängender Hexadezimal-String in Großbuchstaben, ohne Leerzeichen oder Trennzeichen. Jedes Byte wird als zwei Hex-Ziffern dargestellt.
+Die UID im `RFID`-Parameter der `AUTH`-Nachricht ist ein zusammenhängender Hexadezimal-String in Großbuchstaben, ohne Leerzeichen oder Trennzeichen. Jedes Byte wird als zwei Hex-Ziffern dargestellt.
 
 **Beispiele:**
 
-| Karten-Bytes (dezimal) | `"uid"`-Wert |
+| Karten-Bytes (dezimal) | `RFID`-Wert |
 |------------------------|--------------|
 | 161, 178, 195, 212     | `"A1B2C3D4"` |
 | 1, 2, 3, 4             | `"01020304"` |
